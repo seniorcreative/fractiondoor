@@ -69,6 +69,15 @@ export function equals(a, b) {
   return a.n === b.n && a.d === b.d;
 }
 
+/** -1, 0 or 1 for a < b, a === b, a > b. */
+export function compare(a, b) {
+  const left = a.n * b.d;
+  const right = b.n * a.d;
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
 /** Lossy but plenty precise for display and for driving geometry. */
 export function toNumber(f) {
   return Number(f.n) / Number(f.d);
@@ -131,9 +140,23 @@ export function vulgarGlyph(f) {
  *
  * Returns `{ text, exact }`.
  */
-export function formatRational(f, { maxDecimals = 3 } = {}) {
+export function formatRational(f, { maxDecimals = 3, preferVulgar = false } = {}) {
   if (isZero(f)) return { text: '0', exact: true };
   if (isInteger(f)) return { text: String(f.n), exact: true };
+
+  const glyphText = () => {
+    const mixed = toMixed(f);
+    const glyph = vulgarGlyph(frac(mixed.n, mixed.d));
+    if (!glyph) return null;
+    const sign = mixed.sign < 0 ? '-' : '';
+    const whole = mixed.whole === 0n ? '' : String(mixed.whole);
+    return { text: `${sign}${whole}${glyph}`, exact: true };
+  };
+
+  if (preferVulgar) {
+    const glyph = glyphText();
+    if (glyph) return glyph;
+  }
 
   // Exact terminating decimal? Only when the denominator is 2^a * 5^b.
   let d = f.d;
@@ -147,13 +170,8 @@ export function formatRational(f, { maxDecimals = 3 } = {}) {
     }
   }
 
-  const mixed = toMixed(f);
-  const glyph = vulgarGlyph(frac(mixed.n, mixed.d));
-  if (glyph) {
-    const sign = mixed.sign < 0 ? '-' : '';
-    const whole = mixed.whole === 0n ? '' : String(mixed.whole);
-    return { text: `${sign}${whole}${glyph}`, exact: true };
-  }
+  const glyph = glyphText();
+  if (glyph) return glyph;
 
   const value = toNumber(f);
   return { text: trimZeros(value.toFixed(maxDecimals)), exact: false };

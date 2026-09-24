@@ -39,7 +39,7 @@ export const ROW_PRESETS = [
   },
 ];
 
-export const MIN_DENOMINATOR_LIMIT = 12;
+export const MIN_DENOMINATOR_LIMIT = 1;
 export const MAX_DENOMINATOR_LIMIT = 200;
 
 const CLASSIC = [2, 3, 4, 6, 8, 12];
@@ -94,16 +94,20 @@ export function buildDenominators({
       break;
     case 'classic':
     default:
-      // Keep the printed rows, then continue in the same spirit if the limit
-      // is raised: every denominator past 12.
-      list = [...CLASSIC, ...range(13, limit)];
+      // The printed rows, trimmed by the limit so the wall can be taken right
+      // down to a single bar, then continued with every denominator past 12.
+      list = [...CLASSIC.filter((d) => d <= limit), ...range(13, limit)];
       break;
   }
 
+  // Each branch already honours the limit; the custom list is bounded only by
+  // what the app can draw.
   const set = new Set(list.filter((d) => d >= 1 && d <= MAX_DENOMINATOR_LIMIT));
   if (includeWhole) set.add(1);
   else set.delete(1);
-  return [...set].sort((a, b) => a - b);
+  const rows = [...set].sort((a, b) => a - b);
+  // There is always something to look at, even at the bottom of the slider.
+  return rows.length ? rows : [1];
 }
 
 function range(from, to) {

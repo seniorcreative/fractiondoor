@@ -117,10 +117,17 @@ export function createLayout(config, denominators) {
     };
   }
 
+  /**
+   * Content extent, including room for the overlays that hang outside the
+   * blocks: row captions to the left of the first whole and whole captions
+   * above the top row.
+   */
   function bounds() {
     const min = { x: Infinity, y: Infinity, z: Infinity };
     const max = { x: -Infinity, y: -Infinity, z: -Infinity };
     const pad = Math.max(RH, D) * 0.75;
+    const captionLeft = config.showCaptions ? 1.3 : 0;
+    const captionTop = config.showCaptions ? 0.8 : 0;
     for (let wi = 0; wi < wholes; wi += 1) {
       for (let ri = 0; ri < rowCount; ri += 1) {
         for (const t of [0, 0.25, 0.5, 0.75, 1]) {
@@ -134,6 +141,8 @@ export function createLayout(config, denominators) {
         }
       }
     }
+    min.x -= captionLeft;
+    max.y += captionTop;
     return { min, max };
   }
 

@@ -31,7 +31,7 @@ export function pieceHsl(den, index) {
 
 /** Piece colour for the "same span in another row" highlight. */
 export function equivalentHsl(base) {
-  return { h: base.h, s: Math.min(1, base.s + 0.3), l: Math.min(0.85, base.l + 0.16) };
+  return { h: base.h, s: Math.min(1, base.s + 0.38), l: Math.min(0.88, base.l + 0.26) };
 }
 
 /** Piece colour when the pointer is over it. */

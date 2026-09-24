@@ -58,8 +58,9 @@ const MAX_CAPTION_ROWS = 28;
 const LABEL_ALL_LIMIT = 24;
 const CLICK_SLOP_PX = 6;
 const CLICK_MAX_MS = 450;
-const HOVER_POP = 0.1;
-const SELECT_POP = 0.18;
+const HOVER_POP = 0.12;
+const SELECT_POP = 0.2;
+const EQUIVALENT_POP = 0.06;
 
 export class FractionWallScene {
   constructor(container, handlers = {}) {
@@ -72,7 +73,6 @@ export class FractionWallScene {
     this.keyToIndex = new Map();
     this.baseHsl = new Float32Array(0);
     this.selection = new Set();
-    this.appliedSelection = new Set();
     this.hoveredIndex = -1;
     this.equivalentIndices = new Set();
     this.highlightIndices = new Set();
@@ -251,8 +251,7 @@ export class FractionWallScene {
     }
 
     this.grid.visible = config.showGrid !== false;
-    this.#applySelectionPop();
-    this.#applyColors(structureChanged);
+    this.#refreshHighlights(structureChanged);
 
     if (layoutChanged) {
       this.fitView(firstRun ? 'front' : 'auto');
@@ -301,9 +300,23 @@ export class FractionWallScene {
       this.camera.position.copy(position);
       distance = position.distanceTo(target);
     } else {
-      distance = this.#fitDistance(min, max, center, direction);
+      const fit = this.#fitDistance(min, max, center, direction);
+      distance = fit.distance;
       this.controls.target.copy(center);
       this.camera.position.copy(center).addScaledVector(direction, distance);
+
+      // Nudge the framing so the readout panel covers empty space rather than
+      // the wall.
+      const { right, bottom } = this.#safeArea();
+      if (right || bottom) {
+        const height = this.container.clientHeight || 1;
+        const worldPerPixel = (2 * distance * Math.tan(MathUtils.degToRad(this.camera.fov) / 2)) / height;
+        const shift = new Vector3()
+          .addScaledVector(fit.right, (right / 2) * worldPerPixel)
+          .addScaledVector(fit.up, (-bottom / 2) * worldPerPixel);
+        this.controls.target.add(shift);
+        this.camera.position.add(shift);
+      }
     }
 
     this.camera.near = Math.max(0.05, distance * 0.006);
@@ -313,34 +326,51 @@ export class FractionWallScene {
     this.#updateFog(radius, distance);
   }
 
+  /** Screen edges covered by the overlay panels, in CSS pixels. */
+  #safeArea() {
+    const width = this.container.clientWidth || 1;
+    const height = this.container.clientHeight || 1;
+    if (width >= 900) return { right: Math.min(340, width * 0.3), bottom: 0 };
+    return { right: 0, bottom: Math.min(height * 0.45, 300) };
+  }
+
   /**
-   * Distance at which the content's bounding box just fills the frame from a
-   * given direction. Measuring the box's extent along the camera's own axes
-   * keeps flat walls close instead of framing their diagonal like a sphere.
+   * Distance at which the content's bounding box just fills the usable frame
+   * from a given direction. Measuring the box's extent along the camera's own
+   * axes keeps flat walls close instead of framing their diagonal like a sphere.
    */
   #fitDistance(min, max, center, direction) {
-    const up =
-      Math.abs(direction.y) > 0.999 ? new Vector3(0, 0, 1) : new Vector3(0, 1, 0);
-    const right = new Vector3().crossVectors(up, direction).normalize();
-    const camUp = new Vector3().crossVectors(direction, right).normalize();
+    const worldUp = Math.abs(direction.y) > 0.999 ? new Vector3(0, 0, 1) : new Vector3(0, 1, 0);
+    const right = new Vector3().crossVectors(worldUp, direction).normalize();
+    const up = new Vector3().crossVectors(direction, right).normalize();
 
     const corner = new Vector3();
     let halfWidth = 0;
     let halfHeight = 0;
     let halfDepth = 0;
     for (let i = 0; i < 8; i += 1) {
-      corner
-        .set(i & 1 ? max.x : min.x, i & 2 ? max.y : min.y, i & 4 ? max.z : min.z)
-        .sub(center);
+      corner.set(i & 1 ? max.x : min.x, i & 2 ? max.y : min.y, i & 4 ? max.z : min.z).sub(center);
       halfWidth = Math.max(halfWidth, Math.abs(corner.dot(right)));
-      halfHeight = Math.max(halfHeight, Math.abs(corner.dot(camUp)));
+      halfHeight = Math.max(halfHeight, Math.abs(corner.dot(up)));
       halfDepth = Math.max(halfDepth, Math.abs(corner.dot(direction)));
     }
 
+    const width = this.container.clientWidth || 1;
+    const height = this.container.clientHeight || 1;
+    const safe = this.#safeArea();
+    const usableWidth = Math.max(80, width - safe.right);
+    const usableHeight = Math.max(80, height - safe.bottom);
+
     const vFov = MathUtils.degToRad(this.camera.fov);
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * Math.max(0.2, this.camera.aspect));
-    const fit = Math.max(halfHeight / Math.tan(vFov / 2), halfWidth / Math.tan(hFov / 2));
-    return Math.max(1.5, fit * 1.08 + halfDepth);
+    const fitVertical = (halfHeight / Math.tan(vFov / 2)) * (height / usableHeight);
+    const fitHorizontal = (halfWidth / Math.tan(hFov / 2)) * (width / usableWidth);
+
+    return {
+      distance: Math.max(1.5, Math.max(fitVertical, fitHorizontal) * 1.06 + halfDepth),
+      right,
+      up,
+    };
   }
 
   tick() {
@@ -394,7 +424,7 @@ export class FractionWallScene {
 
     this.hoveredIndex = -1;
     this.equivalentIndices = new Set();
-    this.appliedSelection = new Set();
+    this.highlightIndices = new Set();
     this.hoverCard.hide();
 
     this.blocks = new InstancedMesh(this.blockGeometry, this.blockMaterial, this.pieces.length);
@@ -438,6 +468,7 @@ export class FractionWallScene {
     let pop = 0;
     if (this.selection.has(piece.key)) pop = SELECT_POP;
     else if (index === this.hoveredIndex) pop = HOVER_POP;
+    else if (this.equivalentIndices.has(index)) pop = EQUIVALENT_POP;
 
     this.dummy.position.set(
       anchor.x + Math.sin(anchor.ry) * pop,
@@ -450,38 +481,13 @@ export class FractionWallScene {
     this.blocks.setMatrixAt(index, this.dummy.matrix);
   }
 
-  #applySelectionPop() {
-    if (!this.blocks) return;
-    let dirty = false;
-    for (const key of this.appliedSelection) {
-      if (!this.selection.has(key)) {
-        const index = this.keyToIndex.get(key);
-        if (index !== undefined) {
-          this.#writeMatrix(index);
-          dirty = true;
-        }
-      }
-    }
-    for (const key of this.selection) {
-      if (!this.appliedSelection.has(key)) {
-        const index = this.keyToIndex.get(key);
-        if (index !== undefined) {
-          this.#writeMatrix(index);
-          dirty = true;
-        }
-      }
-    }
-    this.appliedSelection = new Set(this.selection);
-    if (dirty) this.blocks.instanceMatrix.needsUpdate = true;
-  }
-
   /**
-   * Repaint instances. Only the blocks whose role changed are rewritten, so
-   * sweeping the pointer across a 200-row wall touches a handful of instances
-   * instead of all 80 000.
+   * Repaint and re-place the blocks whose role changed: selected, hovered or
+   * part of the equivalent-span highlight. Sweeping the pointer across a
+   * 200-row wall touches a handful of instances instead of all 80 000.
    */
-  #applyColors(full = false) {
-    if (!this.blocks) return;
+  #refreshHighlights(full = false) {
+    if (!this.blocks || !this.layout) return;
 
     const current = new Set();
     for (const key of this.selection) {
@@ -492,13 +498,21 @@ export class FractionWallScene {
     if (this.hoveredIndex >= 0) current.add(this.hoveredIndex);
 
     if (full) {
-      for (let i = 0; i < this.pieces.length; i += 1) this.#writeColor(i);
+      for (let i = 0; i < this.pieces.length; i += 1) {
+        this.#writeColor(i);
+        this.#writeMatrix(i);
+      }
     } else {
-      for (const index of this.highlightIndices) this.#writeColor(index);
-      for (const index of current) this.#writeColor(index);
+      const touched = new Set(this.highlightIndices);
+      for (const index of current) touched.add(index);
+      for (const index of touched) {
+        this.#writeColor(index);
+        this.#writeMatrix(index);
+      }
     }
 
     this.highlightIndices = current;
+    this.blocks.instanceMatrix.needsUpdate = true;
     if (this.blocks.instanceColor) this.blocks.instanceColor.needsUpdate = true;
   }
 
@@ -661,15 +675,9 @@ export class FractionWallScene {
   #setHovered(index) {
     if (!this.blocks || !this.layout) return;
     if (index === this.hoveredIndex) return;
-    const previous = this.hoveredIndex;
     this.hoveredIndex = index;
-
-    if (previous >= 0) this.#writeMatrix(previous);
-    if (index >= 0) this.#writeMatrix(index);
-    if (previous >= 0 || index >= 0) this.blocks.instanceMatrix.needsUpdate = true;
-
     this.#computeEquivalents();
-    this.#applyColors();
+    this.#refreshHighlights();
 
     if (index < 0) {
       this.hoverCard.hide();

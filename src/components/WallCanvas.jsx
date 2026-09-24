@@ -1,5 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
-import { FractionWallScene } from '../three/FractionWallScene.js';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { FractionWallScene } from "../three/FractionWallScene.js";
 
 /**
  * Host for the WebGL scene. The scene is created once and then fed new configs;
@@ -21,6 +21,7 @@ const WallCanvas = forwardRef(function WallCanvas(
       onStats: (stats) => handlers.current.onStats?.(stats),
     });
     sceneRef.current = scene;
+    if (import.meta.env.DEV) window.__fractionWall = scene;
     return () => {
       scene.dispose();
       sceneRef.current = null;

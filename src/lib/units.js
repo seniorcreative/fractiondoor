@@ -7,7 +7,16 @@
  * "7 min 30 s" rather than 7.5.
  */
 
-import { frac, multiply, formatRational, isInteger, toNumber } from './fraction.js';
+import {
+  compare,
+  equals,
+  frac,
+  formatRational,
+  isInteger,
+  isZero,
+  multiply,
+} from './fraction.js';
+import { fractionPhrase } from './names.js';
 
 export const UNIT_PRESETS = [
   {
@@ -125,7 +134,7 @@ export const UNIT_PRESETS = [
     id: 'percent',
     label: 'Percent',
     emoji: '\ufe6a',
-    wholeName: 'hundred percent',
+    wholeName: 'whole',
     amount: 100,
     unit: '%',
     kind: 'percent',
@@ -276,12 +285,36 @@ function pluralize(word) {
   return `${word}s`;
 }
 
-/** "2½ pizzas", "1 whole", "0 hours" — how many wholes a selection adds up to. */
+const AN_WORDS = new Set(['hour', 'heir', 'honest']);
+
+/** "a" or "an" for the word that follows. */
+function indefiniteArticle(word) {
+  const first = String(word).trim().toLowerCase();
+  if (AN_WORDS.has(first.split(/\s+/)[0])) return 'an';
+  return /^[aeiou]/.test(first) ? 'an' : 'a';
+}
+
+/**
+ * How much of the whole a selection comes to, said the way people say it.
+ *
+ * Below one whole it reads as a share of a single thing: "half of a whole",
+ * "one quarter of a pizza", "three eighths of an hour". Nobody says "1/2
+ * wholes". At one and above it is a count, so the plural comes back:
+ * "1 whole", "2½ pizzas".
+ */
 export function formatWholes(fraction, unit) {
-  const { text, exact } = formatRational(fraction, { maxDecimals: 3 });
-  const value = toNumber(fraction);
-  const name = value === 1 ? unit.wholeName : pluralize(unit.wholeName);
-  return `${exact ? '' : '\u2248'}${text} ${name}`;
+  const name = unit.wholeName;
+
+  if (isZero(fraction)) return `0 ${pluralize(name)}`;
+
+  const one = frac(1);
+  if (compare(fraction, one) < 0) {
+    return `${fractionPhrase(fraction)} of ${indefiniteArticle(name)} ${name}`;
+  }
+  if (equals(fraction, one)) return `1 ${name}`;
+
+  const { text, exact } = formatRational(fraction, { maxDecimals: 3, preferVulgar: true });
+  return `${exact ? '' : '\u2248'}${text} ${pluralize(name)}`;
 }
 
 /** Caption for one whole in the scene: "1 pizza = 8 slices". */

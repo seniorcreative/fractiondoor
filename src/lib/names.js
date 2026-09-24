@@ -48,6 +48,39 @@ const TENS_CARDINAL = {
   90: 'ninety',
 };
 
+const ONES_CARDINAL = [
+  '',
+  'one',
+  'two',
+  'three',
+  'four',
+  'five',
+  'six',
+  'seven',
+  'eight',
+  'nine',
+  'ten',
+  'eleven',
+  'twelve',
+  'thirteen',
+  'fourteen',
+  'fifteen',
+  'sixteen',
+  'seventeen',
+  'eighteen',
+  'nineteen',
+];
+
+/** Counting word for 1..99, or null when we would rather show digits. */
+export function cardinalWord(n) {
+  if (!Number.isInteger(n) || n < 1 || n > 99) return null;
+  if (n < 20) return ONES_CARDINAL[n];
+  const tens = Math.floor(n / 10) * 10;
+  const ones = n % 10;
+  if (ones === 0) return TENS_CARDINAL[tens];
+  return `${TENS_CARDINAL[tens]}-${ONES_CARDINAL[ones]}`;
+}
+
 /** Ordinal word for 1..99, or null when we would rather show digits. */
 export function ordinalWord(n) {
   if (!Number.isInteger(n) || n < 1 || n > 99) return null;
@@ -88,6 +121,29 @@ export function rowCaption(den) {
 
 /** Compact label for a piece: "1/12". */
 export function fractionLabel(num, den) {
+  return `${num}/${den}`;
+}
+
+const WORD_LIMIT = 20;
+
+/**
+ * How a fraction is said out loud: "half", "one quarter", "three eighths".
+ * Falls back to digits once the words would be a mouthful ("13/24"), and keeps
+ * "half" rather than "one half" because that is how people say it.
+ *
+ * @param {{n: bigint, d: bigint}} fraction
+ */
+export function fractionPhrase({ n, d }) {
+  const num = Number(n);
+  const den = Number(d);
+  if (den === 1) return cardinalWord(num) ?? String(num);
+  if (num === 1 && den === 2) return 'half';
+
+  if (num <= WORD_LIMIT && den <= WORD_LIMIT) {
+    const numberWord = cardinalWord(num);
+    const partWord = num === 1 ? pieceName(den) : pieceNamePlural(den);
+    if (numberWord && !partWord.startsWith('1/')) return `${numberWord} ${partWord}`;
+  }
   return `${num}/${den}`;
 }
 
