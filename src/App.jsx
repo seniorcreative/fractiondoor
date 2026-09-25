@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ControlPanel from "./components/ControlPanel.jsx";
+import ExplorePanel from "./components/ExplorePanel.jsx";
 import HelpOverlay from "./components/HelpOverlay.jsx";
 import InfoPanel from "./components/InfoPanel.jsx";
+import LessonBar from "./components/LessonBar.jsx";
+import LessonPicker from "./components/LessonPicker.jsx";
+import LevelSwitcher from "./components/LevelSwitcher.jsx";
 import WallCanvas from "./components/WallCanvas.jsx";
 import {
   MAX_DENOMINATOR_LIMIT,
@@ -11,6 +15,8 @@ import {
   clamp,
   countPieces,
 } from "./lib/denominators.js";
+import { constrainToLevel, getLevel, levelDefaults } from "./lib/levels.js";
+import { advanceLesson, lessonStartPatch } from "./lib/lessons.js";
 import {
   pruneSelection,
   rowKeys,
@@ -20,11 +26,27 @@ import {
   toggleKey,
 } from "./lib/selection.js";
 import { resolveUnit } from "./lib/units.js";
+import { getLesson } from "./lessons/index.js";
+import { ICONS } from "./lib/icons.js";
 
 const LABEL_CYCLE = ["none", "fraction", "name", "value"];
 const LAYOUT_KEYS = { 1: "wall", 2: "steps", 3: "arc" };
 
+function UnitIcon({ unit }) {
+  const Icon = ICONS[unit.icon];
+  if (!Icon) return null;
+  return (
+    <Icon
+      size={13}
+      strokeWidth={2}
+      aria-hidden="true"
+      style={{ verticalAlign: "-2px", display: "inline-block" }}
+    />
+  );
+}
+
 const DEFAULT_UI = {
+  level: "build",
   rowPreset: "classic",
   maxDenominator: 12,
   includeWhole: true,
@@ -47,15 +69,32 @@ export default function App() {
   const [ui, setUi] = useState(DEFAULT_UI);
   const [selection, setSelection] = useState(() => new Set());
   const [hover, setHover] = useState(null);
+  const [cameraMoved, setCameraMoved] = useState(false);
   const [stats, setStats] = useState(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [lessonPickerOpen, setLessonPickerOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
+
+  // Lesson runtime state.
+  const [activeLessonId, setActiveLessonId] = useState(null);
+  const [lessonStepIndex, setLessonStepIndex] = useState(0);
+
   const canvasRef = useRef(null);
+  const level = getLevel(ui.level);
 
   const patch = useCallback(
     (next) => setUi((prev) => ({ ...prev, ...next })),
     [],
   );
+
+  const switchLevel = useCallback((id) => {
+    setUi((prev) => constrainToLevel({ ...prev, ...levelDefaults(id) }));
+    setActiveLessonId(null);
+    setSelection(new Set());
+    setCameraMoved(false);
+  }, []);
+
+  // ---------------------------------------------------------- derived config
 
   const {
     rowPreset,
@@ -97,42 +136,90 @@ export default function App() {
     [unitId, customAmount, customUnit, customWholeName],
   );
 
-  const config = useMemo(
-    () => ({
-      denominators,
-      wholes,
-      layout,
-      intensity,
-      labelMode,
-      showCaptions,
-      showEquivalents,
-      showAsymptote,
-      showGrid,
-      unit,
-    }),
-    [
-      denominators,
-      wholes,
-      layout,
-      intensity,
-      labelMode,
-      showCaptions,
-      showEquivalents,
-      showAsymptote,
-      showGrid,
-      unit,
-    ],
-  );
+  // Lesson step overlays on top of ui-driven config.
+  const activeLesson = activeLessonId ? getLesson(activeLessonId) : null;
 
-  // Rows and wholes come and go as the wall is reshaped. Only blocks that are
-  // currently on screen count towards the total, so the selection is filtered
-  // during render rather than rewritten: hide a row and its pieces drop out of
-  // the sum, bring it back and they return.
+  const lessonState = useMemo(() => {
+    if (!activeLesson) return null;
+    const appState = {
+      selection,
+      denominators,
+      config: { unit, showAsymptote },
+      lastHover: hover,
+      cameraMoved,
+    };
+    return advanceLesson(activeLesson, lessonStepIndex, appState);
+  }, [
+    activeLesson,
+    lessonStepIndex,
+    selection,
+    denominators,
+    unit,
+    showAsymptote,
+    hover,
+    cameraMoved,
+  ]);
+
+  // Lesson step advancement. useMemo gives us lessonState synchronously;
+  // we write it out to proper state in an effect so the linter is happy.
+  // The effect runs once per lessonState change; because lessonState is a
+  // memo it only changes when the predicate flips, so there is no cascade.
+  useEffect(() => {
+    if (!lessonState || lessonState.done) return;
+    if (lessonState.stepIndex !== lessonStepIndex) {
+      setLessonStepIndex(lessonState.stepIndex);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lessonState]);
+
+  const lessonDone = lessonState?.done ?? false;
+  // Praise comes from the step that just completed. advanceLesson returns it
+  // on the state object of the *next* step, so it is available right after the
+  // index increments. LessonBar handles its own timer for how long to show it.
+  const lessonPraise = lessonState?.praise ?? null;
+
+  const lessonConfigPatch = lessonState?.configPatch ?? null;
+
+  const config = useMemo(() => {
+    const base = {
+      denominators,
+      wholes,
+      layout,
+      intensity,
+      labelMode,
+      showCaptions,
+      showEquivalents,
+      showAsymptote,
+      showGrid,
+      unit,
+      cardDetail: level.ui.cardDetail,
+      cameraLimits: level.camera,
+    };
+    if (!lessonConfigPatch) return base;
+    // Lesson step overrides: merge config fields, but always use live denominators.
+    const merged = { ...base, ...lessonConfigPatch };
+    merged.denominators = denominators;
+    merged.unit = unit;
+    return merged;
+  }, [
+    denominators,
+    wholes,
+    layout,
+    intensity,
+    labelMode,
+    showCaptions,
+    showEquivalents,
+    showAsymptote,
+    showGrid,
+    unit,
+    level,
+    lessonConfigPatch,
+  ]);
+
   const activeSelection = useMemo(
     () => pruneSelection(selection, denominators, wholes),
     [selection, denominators, wholes],
   );
-
   const summary = useMemo(
     () => selectionSummary(activeSelection),
     [activeSelection],
@@ -141,6 +228,8 @@ export default function App() {
     () => countPieces(denominators, wholes),
     [denominators, wholes],
   );
+
+  // ---------------------------------------------------------- handlers
 
   const handlePick = useCallback((info) => {
     setSelection((prev) => {
@@ -155,11 +244,52 @@ export default function App() {
     });
   }, []);
 
+  const handleHover = useCallback((info) => {
+    setHover(info);
+    if (info) setCameraMoved(true); // if you can hover you've at least not lost the wall
+  }, []);
+
   const clearSelection = useCallback(() => setSelection(new Set()), []);
-  const handleView = useCallback(
-    (preset) => canvasRef.current?.fitView(preset),
-    [],
-  );
+  const handleView = useCallback((preset) => {
+    canvasRef.current?.fitView(preset);
+    setCameraMoved(true);
+  }, []);
+
+  const startLesson = useCallback((id) => {
+    const lesson = getLesson(id);
+    if (!lesson) return;
+    setLessonPickerOpen(false);
+    setActiveLessonId(id);
+    setLessonStepIndex(0);
+    setSelection(new Set());
+    setCameraMoved(false);
+    // Switch to the lesson's level if needed.
+    const patch = lessonStartPatch(lesson);
+    setUi((prev) => {
+      const next = constrainToLevel({
+        ...prev,
+        ...levelDefaults(lesson.level),
+        ...patch,
+      });
+      return next;
+    });
+    canvasRef.current?.fitView("front");
+  }, []);
+
+  const skipStep = useCallback(() => {
+    if (!activeLesson) return;
+    const next = lessonStepIndex + 1;
+    if (next >= activeLesson.steps.length) {
+    } else {
+      setLessonStepIndex(next);
+    }
+  }, [activeLesson, lessonStepIndex]);
+
+  const exitLesson = useCallback(() => {
+    setActiveLessonId(null);
+  }, []);
+
+  // ---------------------------------------------------------- keyboard shortcuts
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -167,31 +297,36 @@ export default function App() {
       const tag = event.target?.tagName;
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
 
+      const inv = level.ui;
+
       switch (event.key) {
         case "l":
-        case "L":
+        case "L": {
+          const modes = inv.labelModes ?? LABEL_CYCLE;
           setUi((prev) => ({
             ...prev,
             labelMode:
-              LABEL_CYCLE[
-                (LABEL_CYCLE.indexOf(prev.labelMode) + 1) % LABEL_CYCLE.length
-              ],
+              modes[(modes.indexOf(prev.labelMode) + 1) % modes.length],
           }));
           break;
+        }
         case "a":
         case "A":
-          setUi((prev) => ({ ...prev, showAsymptote: !prev.showAsymptote }));
+          if (inv.showAsymptote)
+            setUi((prev) => ({ ...prev, showAsymptote: !prev.showAsymptote }));
           break;
         case "e":
         case "E":
-          setUi((prev) => ({
-            ...prev,
-            showEquivalents: !prev.showEquivalents,
-          }));
+          if (inv.showEquivalentsToggle)
+            setUi((prev) => ({
+              ...prev,
+              showEquivalents: !prev.showEquivalents,
+            }));
           break;
         case "g":
         case "G":
-          setUi((prev) => ({ ...prev, showGrid: !prev.showGrid }));
+          if (inv.showGrid)
+            setUi((prev) => ({ ...prev, showGrid: !prev.showGrid }));
           break;
         case "c":
         case "C":
@@ -203,11 +338,18 @@ export default function App() {
           break;
         case "1":
         case "2":
-        case "3":
-          setUi((prev) => ({ ...prev, layout: LAYOUT_KEYS[event.key] }));
+        case "3": {
+          const layouts = inv.layouts;
+          const target = LAYOUT_KEYS[event.key];
+          if (!layouts || layouts.includes(target))
+            setUi((prev) => ({ ...prev, layout: target }));
           break;
+        }
         case "w":
-          setUi((prev) => ({ ...prev, wholes: Math.min(6, prev.wholes + 1) }));
+          setUi((prev) => ({
+            ...prev,
+            wholes: Math.min(inv.wholesMax ?? 6, prev.wholes + 1),
+          }));
           break;
         case "W":
           setUi((prev) => ({ ...prev, wholes: Math.max(1, prev.wholes - 1) }));
@@ -233,7 +375,12 @@ export default function App() {
           }));
           break;
         case "?":
-          setHelpOpen((open) => !open);
+          if (inv.showKeyboardHelp) setHelpOpen((open) => !open);
+          break;
+        case "Escape":
+          if (activeLessonId) exitLesson();
+          else if (helpOpen) setHelpOpen(false);
+          else if (lessonPickerOpen) setLessonPickerOpen(false);
           break;
         default:
           break;
@@ -242,50 +389,79 @@ export default function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [level, activeLessonId, exitLesson, helpOpen, lessonPickerOpen]);
+
+  // ---------------------------------------------------------- render
+
+  const isExplore = ui.level === "explore";
 
   return (
-    <div className="fw-app">
+    <div className="fw-app" data-level={ui.level}>
       <header className="fw-top">
         <div className="fw-brand">
           <h1>Fraction wall</h1>
           <p>
             {denominators.length} rows &middot; {wholes}{" "}
-            {wholes === 1 ? "whole" : "wholes"} &middot; {unit.emoji}{" "}
-            {unit.label.toLowerCase()}
+            {wholes === 1 ? "whole" : "wholes"} &middot;{" "}
+            <UnitIcon unit={unit} /> {unit.label.toLowerCase()}
           </p>
         </div>
         <div className="fw-top__actions">
+          <LevelSwitcher current={ui.level} onChange={switchLevel} />
           <button
             type="button"
             className="fw-link"
-            aria-expanded={panelOpen}
-            onClick={() => setPanelOpen((open) => !open)}
+            onClick={() => setLessonPickerOpen(true)}
           >
-            {panelOpen ? "Hide controls" : "Show controls"}
+            Lessons
           </button>
-          <button
-            type="button"
-            className="fw-link"
-            onClick={() => setHelpOpen(true)}
-          >
-            Help
-          </button>
+          {!isExplore && (
+            <button
+              type="button"
+              className="fw-link"
+              aria-expanded={panelOpen}
+              onClick={() => setPanelOpen((open) => !open)}
+            >
+              {panelOpen ? "Hide controls" : "Controls"}
+            </button>
+          )}
+          {level.ui.showKeyboardHelp && (
+            <button
+              type="button"
+              className="fw-link"
+              onClick={() => setHelpOpen(true)}
+            >
+              Help
+            </button>
+          )}
         </div>
       </header>
 
-      <main className="fw-main" data-panel={panelOpen ? "open" : "closed"}>
-        {panelOpen && (
-          <aside className="fw-sidebar" aria-label="Wall controls">
-            <ControlPanel
-              ui={ui}
-              patch={patch}
-              denominators={denominators}
-              unit={unit}
-              pieceCount={pieceCount}
-              onView={handleView}
-            />
+      <main
+        className="fw-main"
+        data-panel={!isExplore && panelOpen ? "open" : "closed"}
+      >
+        {isExplore ? (
+          <aside
+            className="fw-sidebar fw-sidebar--explore"
+            aria-label="Explore controls"
+          >
+            <ExplorePanel ui={ui} patch={patch} />
           </aside>
+        ) : (
+          panelOpen && (
+            <aside className="fw-sidebar" aria-label="Wall controls">
+              <ControlPanel
+                ui={ui}
+                patch={patch}
+                denominators={denominators}
+                unit={unit}
+                pieceCount={pieceCount}
+                onView={handleView}
+                levelUi={level.ui}
+              />
+            </aside>
+          )
         )}
 
         <div className="fw-stage-wrap">
@@ -293,7 +469,7 @@ export default function App() {
             ref={canvasRef}
             config={config}
             selection={activeSelection}
-            onHover={setHover}
+            onHover={handleHover}
             onPick={handlePick}
             onStats={setStats}
           />
@@ -304,11 +480,29 @@ export default function App() {
             stats={stats}
             showAsymptote={showAsymptote}
             onClear={clearSelection}
+            levelUi={level.ui}
           />
+          {activeLesson && (
+            <LessonBar
+              lesson={activeLesson}
+              step={lessonState?.step ?? null}
+              stepIndex={lessonStepIndex}
+              done={lessonDone}
+              praise={lessonPraise}
+              onSkip={skipStep}
+              onExit={exitLesson}
+            />
+          )}
         </div>
       </main>
 
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
+      {lessonPickerOpen && (
+        <LessonPicker
+          onStart={startLesson}
+          onClose={() => setLessonPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }

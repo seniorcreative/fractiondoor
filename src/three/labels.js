@@ -79,6 +79,34 @@ export class LabelLayer {
  * element, so hovering across a wall of 10 000 blocks does no DOM churn beyond
  * rewriting its contents.
  */
+/**
+ * A single pulsing tag that a lesson step can pin above one block: "click this
+ * one". Pointing beats explaining, and it costs one DOM node.
+ */
+export class Chip {
+  constructor() {
+    this.element = document.createElement('div');
+    this.element.className = 'fw-chip';
+    this.object = new CSS2DObject(this.element);
+    this.object.center.set(0.5, 1);
+    this.object.visible = false;
+  }
+
+  show(position, text) {
+    if (this.element.textContent !== text) this.element.textContent = text;
+    this.object.position.set(position.x, position.y, position.z);
+    this.object.visible = true;
+  }
+
+  hide() {
+    this.object.visible = false;
+  }
+
+  dispose() {
+    if (this.element.parentNode) this.element.remove();
+  }
+}
+
 export class HoverCard {
   constructor() {
     this.element = document.createElement('div');
@@ -128,18 +156,24 @@ function escapeHtml(text) {
 
 function cardMarkup(info) {
   const rows = [];
+  // The whole bar reads as "1", not "1/1".
+  const glyph =
+    info.den === 1
+      ? '<span class="fw-frac" aria-hidden="true"><b>1</b></span>'
+      : `<span class="fw-frac" aria-hidden="true"><b>1</b><i>${escapeHtml(info.den)}</i></span>`;
   rows.push(
     `<div class="fw-card__head">` +
-    `<span class="fw-frac" aria-hidden="true"><b>1</b><i>${escapeHtml(info.den)}</i></span>` +
+    glyph +
     `<span class="fw-card__name">${escapeHtml(info.name)}</span>` +
     `</div>`,
   );
   if (info.value) {
     rows.push(`<div class="fw-card__value">${escapeHtml(info.value)}</div>`);
   }
-  rows.push(
-    `<div class="fw-card__meta">${escapeHtml(info.decimal)} \u00b7 ${escapeHtml(info.percent)}</div>`,
-  );
+  if (info.decimal || info.percent) {
+    const parts = [info.decimal, info.percent].filter(Boolean).map(escapeHtml);
+    rows.push(`<div class="fw-card__meta">${parts.join(' \u00b7 ')}</div>`);
+  }
   if (info.equivalents) {
     rows.push(`<div class="fw-card__equiv">= ${escapeHtml(info.equivalents)}</div>`);
   }

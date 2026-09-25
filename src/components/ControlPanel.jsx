@@ -45,11 +45,16 @@ export default function ControlPanel({
   unit,
   pieceCount,
   onView,
+  levelUi = {},
 }) {
   const rowPreset =
     ROW_PRESETS.find((p) => p.id === ui.rowPreset) ?? ROW_PRESETS[0];
   const deepest = denominators[denominators.length - 1];
   const heavy = pieceCount > 25000;
+  const maxDenLimit = levelUi.maxDenominatorLimit ?? MAX_DENOMINATOR_LIMIT;
+  const allowedUnits = levelUi.units ?? null;
+  const allowedLayouts = levelUi.layouts ?? null;
+  const allowedViews = levelUi.views ?? VIEWS.map((v) => v.id);
 
   return (
     <div className="fw-panel">
@@ -63,9 +68,11 @@ export default function ControlPanel({
             value={ui.unitId}
             onChange={(event) => patch({ unitId: event.target.value })}
           >
-            {UNIT_PRESETS.map((preset) => (
+            {UNIT_PRESETS.filter(
+              (p) => !allowedUnits || allowedUnits.includes(p.id),
+            ).map((preset) => (
               <option key={preset.id} value={preset.id}>
-                {preset.emoji} {preset.label}
+                {preset.label}
               </option>
             ))}
           </select>
@@ -128,7 +135,7 @@ export default function ControlPanel({
           label="Wholes on screen"
           value={ui.wholes}
           min={1}
-          max={6}
+          max={levelUi.wholesMax ?? 6}
           onChange={(wholes) => patch({ wholes })}
         />
         <p className="fw-hint">
@@ -180,7 +187,7 @@ export default function ControlPanel({
               id="fw-max-den"
               type="range"
               min={MIN_DENOMINATOR_LIMIT}
-              max={MAX_DENOMINATOR_LIMIT}
+              max={maxDenLimit}
               step="1"
               value={ui.maxDenominator}
               onChange={(event) =>
@@ -215,7 +222,9 @@ export default function ControlPanel({
       <section className="fw-group">
         <h2>Arrangement</h2>
         <div className="fw-layouts">
-          {LAYOUTS.map((layout) => (
+          {LAYOUTS.filter(
+            (l) => !allowedLayouts || allowedLayouts.includes(l.id),
+          ).map((layout) => (
             <button
               key={layout.id}
               type="button"
@@ -229,25 +238,27 @@ export default function ControlPanel({
           ))}
         </div>
 
-        <label className="fw-field" htmlFor="fw-intensity">
-          <span>{INTENSITY_LABEL[ui.layout]}</span>
-          <input
-            autoComplete="off"
-            id="fw-intensity"
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value={ui.intensity}
-            disabled={ui.layout === "wall"}
-            onChange={(event) =>
-              patch({ intensity: Number(event.target.value) })
-            }
-          />
-        </label>
+        {levelUi.showIntensity && (
+          <label className="fw-field" htmlFor="fw-intensity">
+            <span>{INTENSITY_LABEL[ui.layout]}</span>
+            <input
+              autoComplete="off"
+              id="fw-intensity"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={ui.intensity}
+              disabled={ui.layout === "wall"}
+              onChange={(event) =>
+                patch({ intensity: Number(event.target.value) })
+              }
+            />
+          </label>
+        )}
 
         <div className="fw-views">
-          {VIEWS.map((view) => (
+          {VIEWS.filter((v) => allowedViews.includes(v.id)).map((view) => (
             <button key={view.id} type="button" onClick={() => onView(view.id)}>
               {view.label}
             </button>
@@ -262,40 +273,50 @@ export default function ControlPanel({
           <SegmentedControl
             label="Label mode"
             name="labels"
-            options={LABEL_MODES}
+            options={LABEL_MODES.filter(
+              (m) => !levelUi.labelModes || levelUi.labelModes.includes(m.id),
+            )}
             value={ui.labelMode}
             onChange={(labelMode) => patch({ labelMode })}
           />
         </div>
         <div className="fw-toggles">
-          <Toggle
-            pressed={ui.showCaptions}
-            onChange={(showCaptions) => patch({ showCaptions })}
-            hint="Row and whole captions"
-          >
-            Captions
-          </Toggle>
-          <Toggle
-            pressed={ui.showEquivalents}
-            onChange={(showEquivalents) => patch({ showEquivalents })}
-            hint="Hovering a piece lights up the same span in other rows"
-          >
-            Equivalents
-          </Toggle>
-          <Toggle
-            pressed={ui.showAsymptote}
-            onChange={(showAsymptote) => patch({ showAsymptote })}
-            hint="Draw the 1/n curve and the line it approaches"
-          >
-            1/n curve
-          </Toggle>
-          <Toggle
-            pressed={ui.showGrid}
-            onChange={(showGrid) => patch({ showGrid })}
-            hint="Ground grid"
-          >
-            Grid
-          </Toggle>
+          {levelUi.showCaptionsToggle && (
+            <Toggle
+              pressed={ui.showCaptions}
+              onChange={(showCaptions) => patch({ showCaptions })}
+              hint="Row and whole captions"
+            >
+              Captions
+            </Toggle>
+          )}
+          {levelUi.showEquivalentsToggle && (
+            <Toggle
+              pressed={ui.showEquivalents}
+              onChange={(showEquivalents) => patch({ showEquivalents })}
+              hint="Hovering a piece lights up the same span in other rows"
+            >
+              Equivalents
+            </Toggle>
+          )}
+          {levelUi.showAsymptote && (
+            <Toggle
+              pressed={ui.showAsymptote}
+              onChange={(showAsymptote) => patch({ showAsymptote })}
+              hint="Draw the 1/n curve and the line it approaches"
+            >
+              1/n curve
+            </Toggle>
+          )}
+          {levelUi.showGrid && (
+            <Toggle
+              pressed={ui.showGrid}
+              onChange={(showGrid) => patch({ showGrid })}
+              hint="Ground grid"
+            >
+              Grid
+            </Toggle>
+          )}
         </div>
       </section>
     </div>

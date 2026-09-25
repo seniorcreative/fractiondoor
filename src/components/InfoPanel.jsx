@@ -29,10 +29,15 @@ export default function InfoPanel({
   stats,
   showAsymptote,
   onClear,
+  levelUi = {},
 }) {
   const [deeperOpen, setDeeperOpen] = useState(false);
   const hasSelection = summary.count > 0;
-  const unitText = hasSelection ? formatUnitValue(summary.total, unit) : null;
+  const simpleSentence = levelUi.readout === "sentence";
+  const showDeeper = levelUi.showAsymptote !== false;
+  const unitText = hasSelection
+    ? formatUnitValue(summary.total, unit, { style: "spoken" })
+    : null;
 
   return (
     <div className="fw-info">
@@ -48,8 +53,15 @@ export default function InfoPanel({
 
         {!hasSelection ? (
           <p className="fw-hint">
-            Click blocks to add them up. Shift-click fills a row from the left
-            edge, alt-click takes a whole row.
+            {simpleSentence
+              ? "Tap a piece to pick it up."
+              : "Click blocks to add them up. Shift-click fills a row from the left edge, alt-click takes a whole row."}
+          </p>
+        ) : simpleSentence ? (
+          // Explore / lesson mode: one plain sentence.
+          <p className="fw-sentence">
+            {formatWholes(summary.total, unit)}
+            {unit.unit ? ` — ${unitText.text}` : ""}
           </p>
         ) : (
           <>
@@ -89,16 +101,18 @@ export default function InfoPanel({
             <h2>Pointer</h2>
           </header>
           <div className="fw-hoverinfo">
-            <Frac n={1} d={hover.den} />
+            <Frac n={1} d={hover.den === 1 ? null : hover.den} />
             <div>
               <strong>{hover.name}</strong>
               {hover.value && (
                 <span className="fw-hoverinfo__value">{hover.value}</span>
               )}
-              <span className="fw-hoverinfo__meta">
-                {hover.decimal} &middot; {hover.percent}
-              </span>
-              {hover.equivalents && (
+              {!simpleSentence && hover.decimal && (
+                <span className="fw-hoverinfo__meta">
+                  {hover.decimal} &middot; {hover.percent}
+                </span>
+              )}
+              {!simpleSentence && hover.equivalents && (
                 <span className="fw-hoverinfo__equiv">
                   {hover.fraction} = {hover.equivalents}
                 </span>
@@ -111,39 +125,41 @@ export default function InfoPanel({
         </section>
       )}
 
-      <details
-        className="fw-info__block fw-info__details"
-        open={deeperOpen}
-        onToggle={(event) => setDeeperOpen(event.currentTarget.open)}
-      >
-        <summary>
-          <h2>Going deeper</h2>
-          {stats && (
-            <span className="fw-stat">
-              {rowLabel(stats.smallestDen)}
-              {stats.smallestScreenPx === null
-                ? ""
-                : ` \u00b7 ${stats.smallestScreenPx.toFixed(1)} px`}
-            </span>
-          )}
-        </summary>
+      {showDeeper && (
+        <details
+          className="fw-info__block fw-info__details"
+          open={deeperOpen}
+          onToggle={(event) => setDeeperOpen(event.currentTarget.open)}
+        >
+          <summary>
+            <h2>Going deeper</h2>
+            {stats && (
+              <span className="fw-stat">
+                {rowLabel(stats.smallestDen)}
+                {stats.smallestScreenPx === null
+                  ? ""
+                  : ` \u00b7 ${stats.smallestScreenPx.toFixed(1)} px`}
+              </span>
+            )}
+          </summary>
 
-        {stats && (
-          <p className="fw-stat">
-            The deepest row is {rowLabel(stats.smallestDen)}, which is{" "}
-            {toPercentString({ n: 1n, d: BigInt(stats.smallestDen) })} of a
-            whole
-            {stats.smallestScreenPx === null
-              ? "."
-              : ` and about ${stats.smallestScreenPx.toFixed(1)} px wide on screen right now.`}
+          {stats && (
+            <p className="fw-stat">
+              The deepest row is {rowLabel(stats.smallestDen)}, which is{" "}
+              {toPercentString({ n: 1n, d: BigInt(stats.smallestDen) })} of a
+              whole
+              {stats.smallestScreenPx === null
+                ? "."
+                : ` and about ${stats.smallestScreenPx.toFixed(1)} px wide on screen right now.`}
+            </p>
+          )}
+          <p className="fw-hint">
+            {showAsymptote
+              ? "The cyan curve threads the right edge of the first piece in every row: that is y = 1/n. The red line is the left edge of the whole, the asymptote it closes in on forever without touching."
+              : "Turn on the 1/n curve, then drag the deepest row slider and watch the curve flatten onto the left edge."}
           </p>
-        )}
-        <p className="fw-hint">
-          {showAsymptote
-            ? "The cyan curve threads the right edge of the first piece in every row: that is y = 1/n. The red line is the left edge of the whole, the asymptote it closes in on forever without touching."
-            : "Turn on the 1/n curve, then drag the deepest row slider and watch the curve flatten onto the left edge."}
-        </p>
-      </details>
+        </details>
+      )}
     </div>
   );
 }

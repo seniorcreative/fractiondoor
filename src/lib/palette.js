@@ -10,15 +10,15 @@ const HUE_SWEEP = 0.72; // sweeping towards red as pieces get smaller
 const HUE_SPAN = Math.log2(210);
 
 export const SCENE_COLORS = {
-  background: 0x0a0e1a,
-  fog: 0x0a0e1a,
-  grid: 0x1b2540,
+  background: 0xffffff,
+  fog: 0xffffff,
+  grid: 0xcdd6e8,
   frame: 0x7d8bb5,
-  ground: 0x070a12,
+  ground: 0xeef1f7,
   selected: 0xffc24b,
   hovered: 0xffffff,
   asymptote: 0xff5d7a,
-  curve: 0x54e6ff,
+  curve: 0x1fb6c9,
 };
 
 /** Base colour of a piece, as HSL in 0..1. */

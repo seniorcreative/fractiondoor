@@ -43,7 +43,7 @@ export class AsymptoteLayer {
       opacity: 0.85,
       toneMapped: false,
     });
-    this.markerMaterial = new MeshBasicMaterial({ color: 0xf2f7ff, toneMapped: false });
+    this.markerMaterial = new MeshBasicMaterial({ color: 0x1f2a44, toneMapped: false });
     this.markerGeometry = new SphereGeometry(1, 8, 6);
 
     this.meshes = [];

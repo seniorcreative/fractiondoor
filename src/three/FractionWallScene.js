@@ -36,10 +36,11 @@ import {
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 import { buildPieces, createLayout } from './layout.js';
-import { HoverCard, LabelLayer } from './labels.js';
+import { Chip, HoverCard, LabelLayer } from './labels.js';
 import { AsymptoteLayer } from './asymptote.js';
 import {
   SCENE_COLORS,
+  dimHsl,
   equivalentHsl,
   hoveredHsl,
   pieceHsl,
@@ -81,6 +82,7 @@ export class FractionWallScene {
     this.layoutKey = null;
     this.labelKey = null;
     this.asymptoteKey = null;
+    this.focusKey = null;
     this.statsSignature = null;
     this.lastStatsAt = 0;
 
@@ -98,7 +100,7 @@ export class FractionWallScene {
     this.camera = new PerspectiveCamera(50, 1, 0.1, 600);
     this.camera.position.set(0, 1.4, 16);
 
-    const hemi = new HemisphereLight(0xa8c8ff, 0x0a0e1a, 1.15);
+    const hemi = new HemisphereLight(0xffffff, 0xd7deeb, 1.15);
     const key = new DirectionalLight(0xffffff, 1.9);
     key.position.set(5, 9, 11);
     const fill = new DirectionalLight(0x9fb8ff, 0.7);
@@ -118,7 +120,7 @@ export class FractionWallScene {
     this.blockGeometry = new BoxGeometry(1, 1, 1);
     this.blockMaterial = new MeshStandardMaterial({ roughness: 0.42, metalness: 0.06 });
     this.backingMaterial = new MeshStandardMaterial({
-      color: 0x121a30,
+      color: 0xdfe4ee,
       roughness: 0.95,
       metalness: 0,
     });
@@ -132,6 +134,8 @@ export class FractionWallScene {
     this.scene.add(this.labelLayer.group);
     this.hoverCard = new HoverCard();
     this.scene.add(this.hoverCard.object);
+    this.chip = new Chip();
+    this.scene.add(this.chip.object);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -215,6 +219,7 @@ export class FractionWallScene {
 
     const structureKey = `${config.denominators.join(',')}|${config.wholes}`;
     const layoutKey = `${structureKey}|${config.layout}|${config.intensity}`;
+    const focusKey = focusSignature(config.focus);
     const labelKey = [
       layoutKey,
       config.labelMode,
@@ -223,6 +228,7 @@ export class FractionWallScene {
       config.unit.amount,
       config.unit.unit,
       config.unit.wholeName,
+      focusKey,
     ].join('|');
     const asymptoteKey = `${layoutKey}|${config.showAsymptote}`;
 
@@ -250,12 +256,25 @@ export class FractionWallScene {
       this.#computeEquivalents();
     }
 
+    const focusChanged = focusKey !== this.focusKey;
+    this.focusKey = focusKey;
+    if (focusChanged && this.hoveredIndex >= 0 && !this.#isFocused(this.pieces[this.hoveredIndex])) {
+      // The block under the pointer just went out of bounds for this step.
+      this.hoveredIndex = -1;
+      this.equivalentIndices = new Set();
+      this.hoverCard.hide();
+      this.handlers.onHover?.(null);
+    }
+
     this.grid.visible = config.showGrid !== false;
-    this.#refreshHighlights(structureChanged);
+    this.#refreshHighlights(structureChanged || focusChanged);
 
     if (layoutChanged) {
       this.fitView(firstRun ? 'front' : 'auto');
+    } else {
+      this.#applyCameraLimits();
     }
+    this.#updateChip();
     this.statsSignature = null; // force a stats emit on the next frame
   }
 
@@ -324,6 +343,7 @@ export class FractionWallScene {
     this.camera.updateProjectionMatrix();
     this.controls.update();
     this.#updateFog(radius, distance);
+    this.#applyCameraLimits();
   }
 
   /** Screen edges covered by the overlay panels, in CSS pixels. */
@@ -384,6 +404,48 @@ export class FractionWallScene {
     this.#maybeEmitStats();
   }
 
+  /** Apply per-level camera constraints. Called on every config update. */
+  #applyCameraLimits() {
+    const cam = this.config?.cameraLimits;
+    if (!cam) return;
+
+    this.controls.enablePan = cam.pan !== false;
+
+    if (cam.zoomRange && this.layout) {
+      const { min, max } = this.layout.bounds();
+      const span = Math.hypot(max.x - min.x, max.y - min.y, max.z - min.z);
+      this.controls.minDistance = Math.max(0.4, cam.zoomRange[0] * span);
+      this.controls.maxDistance = Math.max(4, cam.zoomRange[1] * span * 3);
+    } else {
+      this.controls.minDistance = 0.4;
+      this.controls.maxDistance = 400;
+    }
+
+    this.controls.maxPolarAngle = cam.tilt != null
+      ? Math.PI * cam.tilt
+      : Math.PI * 0.97;
+
+    this.controls.minAzimuthAngle = cam.turn != null
+      ? -Math.PI * cam.turn
+      : -Infinity;
+    this.controls.maxAzimuthAngle = cam.turn != null
+      ? Math.PI * cam.turn
+      : Infinity;
+  }
+
+  /** Position or hide the lesson chip that points at a specific piece. */
+  #updateChip() {
+    const point = this.config?.pointAt;
+    if (!point || !this.layout) { this.chip.hide(); return; }
+    const index = this.keyToIndex.get(point.key);
+    if (index === undefined) { this.chip.hide(); return; }
+    const piece = this.pieces[index];
+    const mid = (piece.t0 + piece.t1) / 2;
+    const pos = this.#surfacePosition(piece.wholeIndex, piece.rowIndex, mid, 0.18);
+    pos.y += this.layout.dims.rowHeight * 0.6;
+    this.chip.show(pos, point.text ?? '\u25bc');
+  }
+
   dispose() {
     this.renderer.setAnimationLoop(null);
     this.resizeObserver.disconnect();
@@ -396,6 +458,7 @@ export class FractionWallScene {
     this.asymptote.dispose();
     this.labelLayer.dispose();
     this.hoverCard.dispose();
+    this.chip.dispose();
     this.#disposeBlocks();
     this.blockGeometry.dispose();
     this.blockMaterial.dispose();
@@ -519,17 +582,37 @@ export class FractionWallScene {
   #writeColor(index) {
     const piece = this.pieces[index];
     if (!piece) return;
+    const focused = this.#isFocused(piece);
     const base = {
       h: this.baseHsl[index * 3],
       s: this.baseHsl[index * 3 + 1],
       l: this.baseHsl[index * 3 + 2],
     };
-    let hsl = base;
-    if (this.selection.has(piece.key)) hsl = selectedHsl();
-    else if (index === this.hoveredIndex) hsl = hoveredHsl(base);
-    else if (this.equivalentIndices.has(index)) hsl = equivalentHsl(base);
+    let hsl;
+    if (!focused) {
+      hsl = dimHsl(base);
+    } else if (this.selection.has(piece.key)) {
+      hsl = selectedHsl();
+    } else if (index === this.hoveredIndex) {
+      hsl = hoveredHsl(base);
+    } else if (this.equivalentIndices.has(index)) {
+      hsl = equivalentHsl(base);
+    } else {
+      hsl = base;
+    }
     this.tmpColor.setHSL(hsl.h, hsl.s, hsl.l);
     this.blocks.setColorAt(index, this.tmpColor);
+  }
+
+  /**
+   * A piece is in focus if there is no focus filter, or if its denominator
+   * appears in the focus set.
+   */
+  #isFocused(piece) {
+    const focus = this.config?.focus;
+    if (!focus) return true;
+    if (focus.rows && !focus.rows.includes(piece.den)) return false;
+    return true;
   }
 
   #updateBackings() {
@@ -626,7 +709,7 @@ export class FractionWallScene {
       });
 
       for (let wi = 0; wi < wholes; wi += 1) {
-        const parts = [unit.emoji];
+        const parts = [];
         if (wholes > 1) parts.push(`whole ${wi + 1}`);
         if (wi === 0 || wholes === 1) parts.push(wholeCaption(unit));
         list.push({
@@ -669,7 +752,11 @@ export class FractionWallScene {
     if (!this.blocks || !this.pieces.length) return -1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hits = this.raycaster.intersectObject(this.blocks, false);
-    return hits.length ? hits[0].instanceId ?? -1 : -1;
+    for (const hit of hits) {
+      const idx = hit.instanceId ?? -1;
+      if (idx >= 0 && this.#isFocused(this.pieces[idx])) return idx;
+    }
+    return -1;
   }
 
   #setHovered(index) {
@@ -724,10 +811,13 @@ export class FractionWallScene {
     const { den, index, wholeIndex, key } = piece;
     const fraction = frac(1, den);
     const unit = this.config.unit;
-    const formatted = formatUnitValue(fraction, unit);
-    const equivalentList = this.config.showEquivalents
-      ? equivalentFractions(den, this.config.denominators).slice(0, 5)
-      : [];
+    const cardDetail = this.config.cardDetail ?? 'full';
+    // The card is the read-it-out-loud surface: "1 and 1/2 eggs".
+    const formatted = formatUnitValue(fraction, unit, { style: 'spoken' });
+    const equivalentList =
+      cardDetail !== 'simple' && this.config.showEquivalents
+        ? equivalentFractions(den, this.config.denominators).slice(0, 5)
+        : [];
     return {
       key,
       den,
@@ -737,8 +827,9 @@ export class FractionWallScene {
       name: den === 1 ? 'one whole' : pieceName(den),
       value: unit.id === 'abstract' ? null : formatted.text,
       note: formatted.note,
-      decimal: toDecimalString(fraction, den > 99 ? 5 : 4),
-      percent: toPercentString(fraction),
+      // Simple cards (Explore level) omit the decimal and percent lines.
+      decimal: cardDetail === 'simple' ? null : toDecimalString(fraction, den > 99 ? 5 : 4),
+      percent: cardDetail === 'simple' ? null : toPercentString(fraction),
       equivalentList,
       equivalents: equivalentList.length
         ? equivalentList.map(([n, d]) => `${n}/${d}`).join(' = ')
@@ -801,4 +892,14 @@ function labelClass(width) {
   if (width < 0.3) return 'fw-label fw-label--tiny';
   if (width < 0.62) return 'fw-label fw-label--small';
   return 'fw-label';
+}
+
+/**
+ * Stable key for the current focus filter. Two configs with the same rows
+ * produce the same key, so the label/colour pass is not re-run unnecessarily.
+ */
+function focusSignature(focus) {
+  if (!focus) return 'all';
+  if (focus.rows) return `rows:${[...focus.rows].sort().join(',')}`;
+  return 'custom';
 }

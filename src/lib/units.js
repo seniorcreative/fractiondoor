@@ -15,14 +15,19 @@ import {
   isInteger,
   isZero,
   multiply,
+  toMixed,
+  vulgarGlyph,
 } from './fraction.js';
 import { fractionPhrase } from './names.js';
+
+// `indefiniteArticle` is defined below, next to the whole-count phrasing it
+// shares with the countable units.
 
 export const UNIT_PRESETS = [
   {
     id: 'abstract',
     label: 'Abstract whole',
-    emoji: '\u25a6',
+    icon: 'Square',
     wholeName: 'whole',
     amount: 1,
     unit: '',
@@ -32,30 +37,33 @@ export const UNIT_PRESETS = [
   {
     id: 'pizza',
     label: 'Pizza',
-    emoji: '\ud83c\udf55',
+    icon: 'Pizza',
     wholeName: 'pizza',
     amount: 8,
     unit: 'slices',
+    unitOne: 'slice',
     kind: 'count',
     blurb: 'One pizza cut into 8 slices.',
   },
   {
     id: 'cake',
     label: 'Cake',
-    emoji: '\ud83c\udf82',
+    icon: 'CakeSlice',
     wholeName: 'cake',
     amount: 12,
     unit: 'slices',
+    unitOne: 'slice',
     kind: 'count',
     blurb: 'One cake cut into 12 slices.',
   },
   {
     id: 'chocolate',
     label: 'Chocolate bar',
-    emoji: '\ud83c\udf6b',
+    icon: 'Grid3x3',
     wholeName: 'bar',
     amount: 24,
     unit: 'squares',
+    unitOne: 'square',
     kind: 'count',
     discrete: true,
     blurb: '24 squares, and you cannot break a square in half neatly.',
@@ -63,7 +71,7 @@ export const UNIT_PRESETS = [
   {
     id: 'pound',
     label: 'One pound',
-    emoji: '\ud83d\udcb7',
+    icon: 'PoundSterling',
     wholeName: 'pound',
     amount: 100,
     unit: 'p',
@@ -73,7 +81,7 @@ export const UNIT_PRESETS = [
   {
     id: 'hour',
     label: 'One hour',
-    emoji: '\ud83d\udd50',
+    icon: 'Clock',
     wholeName: 'hour',
     amount: 60,
     unit: 'min',
@@ -83,7 +91,7 @@ export const UNIT_PRESETS = [
   {
     id: 'day',
     label: 'One day',
-    emoji: '\ud83d\udcc5',
+    icon: 'Calendar',
     wholeName: 'day',
     amount: 24,
     unit: 'h',
@@ -93,7 +101,7 @@ export const UNIT_PRESETS = [
   {
     id: 'metre',
     label: 'One metre',
-    emoji: '\ud83d\udccf',
+    icon: 'Ruler',
     wholeName: 'metre',
     amount: 100,
     unit: 'cm',
@@ -103,7 +111,7 @@ export const UNIT_PRESETS = [
   {
     id: 'kilogram',
     label: 'One kilogram',
-    emoji: '\u2696\ufe0f',
+    icon: 'Scale',
     wholeName: 'kilogram',
     amount: 1000,
     unit: 'g',
@@ -113,7 +121,7 @@ export const UNIT_PRESETS = [
   {
     id: 'litre',
     label: 'One litre',
-    emoji: '\ud83e\uddea',
+    icon: 'FlaskConical',
     wholeName: 'litre',
     amount: 1000,
     unit: 'ml',
@@ -123,7 +131,7 @@ export const UNIT_PRESETS = [
   {
     id: 'turn',
     label: 'Full turn',
-    emoji: '\ud83e\udded',
+    icon: 'Compass',
     wholeName: 'turn',
     amount: 360,
     unit: '\u00b0',
@@ -133,7 +141,7 @@ export const UNIT_PRESETS = [
   {
     id: 'percent',
     label: 'Percent',
-    emoji: '\ufe6a',
+    icon: 'Percent',
     wholeName: 'whole',
     amount: 100,
     unit: '%',
@@ -143,10 +151,11 @@ export const UNIT_PRESETS = [
   {
     id: 'class',
     label: 'Class of 30',
-    emoji: '\ud83e\uddd1\u200d\ud83c\udfeb',
+    icon: 'Users',
     wholeName: 'class',
     amount: 30,
     unit: 'children',
+    unitOne: 'child',
     kind: 'count',
     discrete: true,
     blurb: '30 children, so fifths and sixths land on whole people.',
@@ -154,10 +163,11 @@ export const UNIT_PRESETS = [
   {
     id: 'dozen',
     label: 'Dozen eggs',
-    emoji: '\ud83e\udd5a',
+    icon: 'Egg',
     wholeName: 'dozen',
     amount: 12,
     unit: 'eggs',
+    unitOne: 'egg',
     kind: 'count',
     discrete: true,
     blurb: '12 eggs in the box.',
@@ -165,10 +175,11 @@ export const UNIT_PRESETS = [
   {
     id: 'custom',
     label: 'Custom\u2026',
-    emoji: '\u2733\ufe0f',
+    icon: 'Sparkles',
     wholeName: 'whole',
     amount: 1,
     unit: 'units',
+    unitOne: 'unit',
     kind: 'count',
     blurb: 'Set your own amount and unit name.',
   },
@@ -181,10 +192,12 @@ export function resolveUnit(unitId, custom = {}) {
   const preset = PRESETS_BY_ID.get(unitId) ?? PRESETS_BY_ID.get('abstract');
   if (preset.id !== 'custom') return preset;
   const amount = Number(custom.amount);
+  const unit = (custom.unit ?? '').trim() || 'units';
   return {
     ...preset,
     amount: Number.isFinite(amount) && amount > 0 ? amount : 1,
-    unit: (custom.unit ?? '').trim() || 'units',
+    unit,
+    unitOne: singularize(unit),
     wholeName: (custom.wholeName ?? '').trim() || 'whole',
     blurb: 'Your own whole.',
   };
@@ -207,10 +220,15 @@ const NO_SPACE = new Set(['%', '\u00b0', 'p', '\u00a2']);
 
 /**
  * Format `fraction` of a whole in the current unit.
+ *
+ * `style` picks how a part-way amount is written:
+ *   compact — "1½ eggs", for labels sitting inside a block
+ *   spoken  — "1 and 1/2 eggs", for the cards, which is how it is read aloud
+ *
  * Returns `{ text, exact, note }` where `note` flags units that cannot be
  * split (half an egg) and `exact` is false when the number was rounded.
  */
-export function formatUnitValue(fraction, unit) {
+export function formatUnitValue(fraction, unit, { style = 'compact' } = {}) {
   const value = unitValue(fraction, unit);
 
   switch (unit.kind) {
@@ -221,19 +239,76 @@ export function formatUnitValue(fraction, unit) {
     case 'time-day':
       return formatTimeFromSeconds(multiply(fraction, frac(86400)), value, 'h');
     default:
-      return formatPlain(value, unit);
+      return formatPlain(value, unit, style);
   }
 }
 
-function formatPlain(value, unit) {
-  const { text, exact } = formatRational(value, { maxDecimals: 3 });
-  const glue = NO_SPACE.has(unit.unit) ? '' : ' ';
-  const suffix = unit.unit ? `${glue}${unit.unit}` : '';
+/**
+ * Things you count get fractions, because 1.5 eggs is not how anyone says it.
+ * Things you measure keep decimals, because 12.5 cm is.
+ */
+function formatPlain(value, unit, style) {
+  const note =
+    unit.discrete && !isInteger(value) ? `does not split into whole ${unit.unit}` : null;
+
+  if (unit.kind === 'count') {
+    return { text: formatCount(value, unit, style), exact: true, note };
+  }
+
+  const rational = formatRational(value, { maxDecimals: 3 });
+  const noun = unitNoun(unit, value);
+  const glue = NO_SPACE.has(noun) ? '' : ' ';
   return {
-    text: `${exact ? '' : '\u2248'}${text}${suffix}`,
-    exact,
-    note: unit.discrete && !isInteger(value) ? `does not split into whole ${unit.unit}` : null,
+    text: `${rational.exact ? '' : '\u2248'}${rational.text}${noun ? `${glue}${noun}` : ''}`,
+    exact: rational.exact,
+    note,
   };
+}
+
+/**
+ * Countable amounts, agreeing with the number: "2 eggs", "1 egg",
+ * "1½ eggs", and below one a share of a single thing, "half of an egg",
+ * because "¾ eggs" is not something anyone says.
+ */
+function formatCount(value, unit, style) {
+  if (isZero(value)) return `0 ${unit.unit}`;
+
+  const singular = unit.unitOne ?? singularize(unit.unit);
+
+  if (compare(value, frac(1)) < 0) {
+    const share = style === 'spoken' ? fractionPhrase(value) : compactFraction(value);
+    return `${share} of ${indefiniteArticle(singular)} ${singular}`;
+  }
+
+  return `${countText(value, style)} ${unitNoun(unit, value)}`;
+}
+
+/** "1", "1½", or "1 and 1/2" depending on the style. */
+function countText(value, style) {
+  if (isInteger(value)) return String(value.n);
+
+  const { sign, whole, n, d } = toMixed(value);
+  const prefix = sign < 0 ? '-' : '';
+
+  if (style === 'spoken') {
+    return whole === 0n ? `${prefix}${n}/${d}` : `${prefix}${whole} and ${n}/${d}`;
+  }
+
+  const glyph = vulgarGlyph(frac(n, d));
+  if (glyph) return `${prefix}${whole === 0n ? '' : whole}${glyph}`;
+  return whole === 0n ? `${prefix}${n}/${d}` : `${prefix}${whole} ${n}/${d}`;
+}
+
+/** "½" where a single glyph exists, otherwise "3/32". */
+function compactFraction(value) {
+  return vulgarGlyph(value) ?? `${value.n}/${value.d}`;
+}
+
+/** Unit noun agreeing with the amount: 1 egg, 2 eggs, 1½ eggs. */
+function unitNoun(unit, value) {
+  if (!unit.unit) return '';
+  const isOne = isInteger(value) && (value.n === 1n || value.n === -1n);
+  return isOne ? unit.unitOne ?? singularize(unit.unit) : unit.unit;
 }
 
 function formatMoneyGbp(pence) {
@@ -285,6 +360,19 @@ function pluralize(word) {
   return `${word}s`;
 }
 
+/**
+ * Rough singular of a plural unit name, for agreement at exactly one.
+ * Irregulars (children) carry an explicit `unitOne` on the preset instead.
+ */
+function singularize(word) {
+  if (!word) return word;
+  if (/ies$/i.test(word)) return `${word.slice(0, -3)}y`;
+  if (/(ch|sh|s|x)es$/i.test(word)) return word.slice(0, -2);
+  if (/ss$/i.test(word)) return word;
+  if (/s$/i.test(word)) return word.slice(0, -1);
+  return word;
+}
+
 const AN_WORDS = new Set(['hour', 'heir', 'honest']);
 
 /** "a" or "an" for the word that follows. */
@@ -321,7 +409,8 @@ export function formatWholes(fraction, unit) {
 export function wholeCaption(unit) {
   if (unit.kind === 'plain' || unit.kind === 'count' || unit.kind === 'angle' || unit.kind === 'percent') {
     if (!unit.unit) return `1 ${unit.wholeName}`;
-    return `1 ${unit.wholeName} = ${unit.amount}${NO_SPACE.has(unit.unit) ? '' : ' '}${unit.unit}`;
+    const noun = unitNoun(unit, frac(Math.round(unit.amount)));
+    return `1 ${unit.wholeName} = ${unit.amount}${NO_SPACE.has(noun) ? '' : ' '}${noun}`;
   }
   if (unit.kind === 'money-gbp') return '\u00a31 = 100p';
   if (unit.kind === 'time-hour') return '1 hour = 60 min';
